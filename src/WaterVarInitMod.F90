@@ -366,6 +366,7 @@ contains
     noahmp%water%param%SnowMeltFac                 = undefined_real
     noahmp%water%param%SnowCoverFac                = undefined_real
     noahmp%water%param%WetlandCapMax               = undefined_real
+    noahmp%water%param%SnowCoverFracMax            = undefined_real
 
     if ( .not. allocated(noahmp%water%param%SoilMoistureSat) )        &
        allocate( noahmp%water%param%SoilMoistureSat(1:NumSoilLayer) )
