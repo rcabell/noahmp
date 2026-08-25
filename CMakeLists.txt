@@ -12,12 +12,16 @@ file(GLOB NOAHMP_SUBMODULE_UTILITY_SOURCES
 
 # Select specific driver files needed for WRF-Hydro integration.
 # Excludes NoahmpDriverMainMod (depends on module_ra_gfdleta),
-# NoahmpReadNamelistMod (standalone namelist reader),
 # NoahmpInitMainMod/NoahmpSnowInitMod/NoahmpGroundwaterInitMod (standalone init),
 # and GroundWaterMmfMod (WRF-Hydro uses its own groundwater module).
+# NoahmpReadNamelistMod is now used as the NOAHLSM_OFFLINE reader (locally
+# patched: WRF_HYDRO-only vars moved to hydro.namelist, RUNOFF_OPTION kept as
+# a deprecated alias, and forcing_name_LF/imperv_option/rst_bi_in/rst_bi_out
+# added for WRF-Hydro compatibility -- see namelist_migration_plan.md).
 set(NOAHMP_SUBMODULE_DRIVER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/NoahmpIOVarType.F90
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/NoahmpIOVarInitMod.F90
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/NoahmpReadNamelistMod.F90
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/NoahmpReadTableMod.F90
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/PedoTransferSR2006Mod.F90
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers/hrldas/ConfigVarInTransferMod.F90
