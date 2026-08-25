@@ -70,10 +70,12 @@ contains
     character(len=256)      :: forcing_name_SN = ""
     character(len=256)      :: forcing_name_DirFrac = ""
     character(len=256)      :: forcing_name_VisFrac = ""
+    character(len=256)      :: forcing_name_LF = ""  ! WRF-Hydro-only: liquid water fraction forcing name
     integer                 :: dynamic_veg_option                 = 4
     integer                 :: canopy_stomatal_resistance_option  = 1
     integer                 :: btr_option                         = 1
     integer                 :: surface_runoff_option              = 3
+    integer                 :: runoff_option                      = -9999  ! deprecated alias for surface_runoff_option
     integer                 :: subsurface_runoff_option           = 3
     integer                 :: surface_drag_option                = 1
     integer                 :: supercooled_water_option           = 1
@@ -91,7 +93,8 @@ contains
     integer                 :: soil_data_option                   = 1
     integer                 :: pedotransfer_option                = 1
     integer                 :: crop_option                        = 0
-    integer                 :: irrigation_option                  = 0 
+    integer                 :: imperv_option                      = 0  ! WRF-Hydro-only: impervious-surface option
+    integer                 :: irrigation_option                  = 0
     integer                 :: irrigation_method                  = 0
     integer                 :: dvic_infiltration_option           = 1
     integer                 :: tile_drainage_option               = 0
@@ -113,6 +116,8 @@ contains
     integer                 :: ystart                             = 1
     integer                 :: xend                               = 0
     integer                 :: yend                               = 0
+    integer                 :: rst_bi_in                          = 0  ! WRF-Hydro-only: 0=netcdf, 1=per-core binary restart read
+    integer                 :: rst_bi_out                         = 0  ! WRF-Hydro-only: 0=netcdf, 1=per-core binary restart write
     integer, parameter      :: MAX_SOIL_LEVELS                    = 10     ! maximum soil levels in namelist
     real(kind=kind_noahmp), dimension(MAX_SOIL_LEVELS) :: soil_thick_input ! depth to soil interfaces from namelist [m]
 
@@ -139,33 +144,32 @@ contains
     character(len=256)      :: forcing_name_DUST5                 = "DUST5"
 
     namelist / NOAHLSM_OFFLINE /    &
-#ifdef WRF_HYDRO
-         finemesh,finemesh_factor,forc_typ, snow_assim , GEO_STATIC_FLNM, HRLDAS_ini_typ, &
-#endif
          indir, nsoil, soil_thick_input, forcing_timestep, noah_timestep, soil_timestep,  &
          start_year, start_month, start_day, start_hour, start_min,                       &
          outdir, skip_first_output, noahmp_output,                                        &
          restart_filename_requested, restart_frequency_hours, output_timestep,            &
          spinup_loops,                                                                    &
          forcing_name_T,forcing_name_Q,forcing_name_U,forcing_name_V,forcing_name_P,      &
-         forcing_name_LW,forcing_name_SW,forcing_name_PR,forcing_name_SN,                 &
+         forcing_name_LW,forcing_name_SW,forcing_name_PR,forcing_name_SN,forcing_name_LF, &
          forcing_name_DirFrac, forcing_name_VisFrac,                                      &
          dynamic_veg_option, canopy_stomatal_resistance_option,                           &
-         btr_option, surface_drag_option, supercooled_water_option, snow_cover_option,    &
+         btr_option, runoff_option, surface_drag_option, supercooled_water_option,        &
+         snow_cover_option,                                                               &
          frozen_soil_option, radiative_transfer_option, snow_albedo_option,               &
          snow_thermal_conductivity, surface_runoff_option, subsurface_runoff_option,      &
          pcp_partition_option, tbot_option, temp_time_scheme_option, wetland_option,      &
          glacier_option, surface_resistance_option, snow_compaction_option,               &
          irrigation_option, irrigation_method, dvic_infiltration_option,                  &
          tile_drainage_option,soil_data_option, pedotransfer_option, crop_option,         &
+         imperv_option,                                                                   &
          sf_urban_physics,use_wudapt_lcz,num_urban_hi,urban_atmosphere_thickness,         &
          num_urban_ndm,num_urban_ng,num_urban_nwr ,num_urban_ngb ,                        &
          num_urban_nf ,num_urban_nz,num_urban_nbui,num_urban_ngr ,                        &
-         split_output_count,                                                              & 
+         split_output_count,                                                              &
          khour, kday, zlvl, hrldas_setup_file,                                            &
          spatial_filename, agdata_flnm, tdinput_flnm, snicar_optic_flnm, snicar_age_flnm, &
          external_veg_filename_template, external_lai_filename_template,                  &
-         xstart, xend, ystart, yend,                                                      &
+         xstart, xend, ystart, yend, rst_bi_out, rst_bi_in,                               &
          snicar_bandnumber_option, snicar_solarspec_option, snicar_snowoptics_option,     &
          snicar_dustoptics_option, snicar_rtsolver_option, snicar_snowshape_option,       &
          snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix,                &
@@ -198,7 +202,7 @@ contains
     NoahmpIO%noahmp_output           = 0
 
     !---------------------------------------------------------------
-    ! read namelist.input
+    ! read namelist.hrldas
     !---------------------------------------------------------------
     
     open(30, file="namelist.hrldas", form="FORMATTED")
@@ -210,7 +214,16 @@ contains
        stop " ***** ERROR: Problem reading namelist NOAHLSM_OFFLINE"
     endif
     close(30)
-  
+
+    ! Deprecated alias: RUNOFF_OPTION was renamed SURFACE_RUNOFF_OPTION upstream.
+    ! If a namelist still sets the old name, honor it (permanent compatibility shim
+    ! for existing namelist.hrldas files in this repo).
+    if (runoff_option /= -9999) then
+       write(*,'(" ***** NOAHLSM_OFFLINE: RUNOFF_OPTION is deprecated, use SURFACE_RUNOFF_OPTION. ", &
+                 "Honoring RUNOFF_OPTION = ", I4)') runoff_option
+       surface_runoff_option = runoff_option
+    endif
+
     NoahmpIO%DTBL            = real(noah_timestep)
     NoahmpIO%soiltstep       = soil_timestep
     NoahmpIO%NSOIL           = nsoil
@@ -418,6 +431,8 @@ contains
     NoahmpIO%forcing_name_SN                   = forcing_name_SN
     NoahmpIO%forcing_name_DirFrac              = forcing_name_DirFrac
     NoahmpIO%forcing_name_VisFrac              = forcing_name_VisFrac
+    NoahmpIO%forcing_name_LF                   = forcing_name_LF
+    NoahmpIO%imperv_option                     = imperv_option
     NoahmpIO%split_output_count                = split_output_count
     NoahmpIO%skip_first_output                 = skip_first_output
     NoahmpIO%khour                             = khour
@@ -433,6 +448,8 @@ contains
     NoahmpIO%ystart                            = ystart
     NoahmpIO%xend                              = xend
     NoahmpIO%yend                              = yend
+    NoahmpIO%rst_bi_in                         = rst_bi_in
+    NoahmpIO%rst_bi_out                        = rst_bi_out
     NoahmpIO%MAX_SOIL_LEVELS                   = MAX_SOIL_LEVELS
     NoahmpIO%soil_thick_input                  = soil_thick_input 
     ! SNICAR
