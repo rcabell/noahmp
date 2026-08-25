@@ -54,7 +54,11 @@ contains
     !if ( (NumSnowLayerNeg == 0)  .and. (SnowfallGround > 0.0) .and. (SnowDepth >= 0.05) ) then
     !if ( (NumSnowLayerNeg == 0)  .and. (SnowfallGround > 0.0) .and. (SnowDepth >= 0.025) ) then !MB: change limit
     ! C.He: remove SnowfallGround > 0.0 to allow adjusting snow layer number based on SnowDepth when no snowfall
+#ifdef NOAHMP_LEGACY_PHYSICS
+    if ( (NumSnowLayerNeg == 0) .and. (SnowfallGround > 0.0) .and. (SnowDepth >= 0.025) ) then
+#else
     if ( (NumSnowLayerNeg == 0) .and. (SnowDepth >= 0.025) ) then
+#endif
        NumSnowLayerNeg           = -1
        IndNewSnowLayer           =  1
        ThicknessSnowSoilLayer(0) = SnowDepth
