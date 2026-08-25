@@ -772,6 +772,7 @@ module NoahmpIOVarType
     character(len=256)                                     ::  forcing_name_SN
     character(len=256)                                     ::  forcing_name_DirFrac
     character(len=256)                                     ::  forcing_name_VisFrac
+    character(len=256)                                     ::  forcing_name_LF     ! WRF-Hydro-only: liquid water fraction forcing name
 
     integer                                                ::  noahmp_output       ! =0: default output; >0 include additional output
     integer                                                ::  split_output_count
@@ -791,6 +792,9 @@ module NoahmpIOVarType
     integer                                                ::  ystart
     integer                                                ::  xend
     integer                                                ::  yend
+    integer                                                ::  imperv_option       ! WRF-Hydro-only: impervious-surface option
+    integer                                                ::  rst_bi_in           ! WRF-Hydro-only: 0=netcdf, 1=per-core binary restart read
+    integer                                                ::  rst_bi_out          ! WRF-Hydro-only: 0=netcdf, 1=per-core binary restart write
     integer                                                ::  MAX_SOIL_LEVELS
     real(kind=kind_noahmp),  allocatable, dimension(:)     ::  soil_thick_input
 
