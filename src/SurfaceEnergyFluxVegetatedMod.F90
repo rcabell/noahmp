@@ -327,6 +327,20 @@ contains
        FluxTotCoeff         = VegFrac * (4.0*LwCoeffCan*TemperatureCanopy**3 + ShCoeff + &
                                         (LhCoeff+TranspHeatCoeff)*VapPresSatCanTempD + HeatCapacCan/MainTimeStep)     ! volumetric heat capacity
        TemperatureCanChg    = EnergyResTmp / FluxTotCoeff
+       ! Damp the Newton-Raphson step, a standard safeguard against divergence
+       ! in Newton-type solvers (cf. damped Newton / trust-region methods),
+       ! not a physical temperature bound -- it never touches a
+       ! legitimately-computed temperature, however extreme, since real
+       ! physics converges via small steps (the exit criterion a few lines
+       ! below requires |TemperatureCanChg| <= 0.01 K). It only intervenes
+       ! when a single iteration's correction is already far larger than any
+       ! step a converging solve would ever take, which is what preceded a
+       ! runaway observed on a marginal real-world cell (a cropland/
+       ! natural-vegetation-mosaic with an extreme SHDMIN/SHDMAX seasonal
+       ! swing) that otherwise diverged across iterations/timesteps into a
+       ! fatal downstream budget-check stop -- fatal to one MPI rank without
+       ! calling MPI_Finalize, which deadlocks the rest of a parallel run.
+       TemperatureCanChg    = min( max(TemperatureCanChg, -25.0), 25.0 )
        ! update fluxes with temperature change
        RadLwNetCanopy       = RadLwNetCanopy      + VegFrac * 4.0 * LwCoeffCan * TemperatureCanopy**3 * TemperatureCanChg
        HeatSensibleCanopy   = HeatSensibleCanopy  + VegFrac * ShCoeff * TemperatureCanChg
@@ -377,6 +391,9 @@ contains
                             HeatLatentVegGrd - HeatGroundVegGrd + HeatPrecipAdvVegGrd
        FluxTotCoeff       = 4.0 * LwCoeffCan * TemperatureGrdVeg**3 + ShCoeff + LhCoeff*VapPresSatGrdVegTempD + GrdHeatCoeff
        TemperatureGrdChg  = EnergyResTmp / FluxTotCoeff
+       ! Damped Newton-Raphson step, see the matching comment on
+       ! TemperatureCanChg in loop1 above for rationale.
+       TemperatureGrdChg  = min( max(TemperatureGrdChg, -25.0), 25.0 )
        RadLwNetVegGrd     = RadLwNetVegGrd + 4.0 * LwCoeffCan * TemperatureGrdVeg**3 * TemperatureGrdChg
        HeatSensibleVegGrd = HeatSensibleVegGrd + ShCoeff * TemperatureGrdChg
        HeatLatentVegGrd   = HeatLatentVegGrd + LhCoeff * VapPresSatGrdVegTempD * TemperatureGrdChg
