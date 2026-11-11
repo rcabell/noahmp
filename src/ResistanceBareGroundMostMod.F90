@@ -42,6 +42,9 @@ contains
     real(kind=kind_noahmp)                :: FH2NEW                      ! stability correction factor, sen heat, for current moz
     real(kind=kind_noahmp)                :: TMP12,TMP22,TMP32           ! temporary calculation
     real(kind=kind_noahmp)                :: CMFM, CHFH, CM2FM2, CH2FH2  ! temporary calculation
+    real(kind=kind_noahmp)                :: RefHeightAboveGrdEff        ! locally-clamped
+                                                                          ! (RefHeightAboveGrd - ZeroPlaneDispGrd), see rationale below
+    integer, save                         :: RefHeightWarnCount = 0      ! per-rank throttle counter
 
 ! --------------------------------------------------------------------
     associate(                                                                     &
@@ -73,14 +76,22 @@ contains
     ! initialization
     MPE    = 1.0e-6
     MOZOLD = MoStabParaBare  ! M-O stability parameter for next iteration
-    if ( RefHeightAboveGrd <= ZeroPlaneDispGrd ) then
-       write(*,*) "WARNING: critical problem: RefHeightAboveGrd <= ZeroPlaneDispGrd; model stops"
-       stop "Error in ResistanceBareGroundMostMod.F90"
+    ! See the matching rationale in ResistanceAboveCanopyMostMod.F90 -- clamp
+    ! only the local height-difference used in the log() calls below, don't
+    ! mutate the shared, persistent RefHeightAboveGrd state.
+    RefHeightAboveGrdEff = RefHeightAboveGrd - ZeroPlaneDispGrd
+    if ( RefHeightAboveGrdEff <= 0.0 ) then
+       RefHeightWarnCount = RefHeightWarnCount + 1
+       if ( RefHeightWarnCount <= 20 .or. mod(RefHeightWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: RefHeightAboveGrd <= ZeroPlaneDispGrd (occurrence #", RefHeightWarnCount, "on this rank)"
+          if ( RefHeightWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
+       RefHeightAboveGrdEff = RoughLenMomGrd  ! small positive floor -> TMPCM = log(1) = 0
     endif
 
     ! temporary drag coefficients
-    TMPCM  = log((RefHeightAboveGrd - ZeroPlaneDispGrd) / RoughLenMomGrd)
-    TMPCH  = log((RefHeightAboveGrd - ZeroPlaneDispGrd) / RoughLenShBareGrd)
+    TMPCM  = log(RefHeightAboveGrdEff / RoughLenMomGrd)
+    TMPCH  = log(RefHeightAboveGrdEff / RoughLenShBareGrd)
     TMPCM2 = log((2.0 + RoughLenMomGrd) / RoughLenMomGrd)
     TMPCH2 = log((2.0 + RoughLenShBareGrd) / RoughLenShBareGrd)
 

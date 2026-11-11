@@ -41,6 +41,9 @@ contains
     real(kind=kind_noahmp)                :: FH2NEW                      ! stability correction factor, sen heat, for current moz
     real(kind=kind_noahmp)                :: TMP12,TMP22,TMP32           ! temporary calculation
     real(kind=kind_noahmp)                :: CMFM, CHFH, CM2FM2, CH2FH2  ! temporary calculation
+    real(kind=kind_noahmp)                :: RefHeightAboveSfcEff        ! locally-clamped
+                                                                          ! (RefHeightAboveGrd - ZeroPlaneDispSfc), see rationale below
+    integer, save                         :: RefHeightWarnCount = 0      ! per-rank throttle counter
 
 ! --------------------------------------------------------------------
     associate(                                                                    &
@@ -72,14 +75,27 @@ contains
     ! initialization
     MPE    = 1.0e-6
     MOZOLD = MoStabParaAbvCan  ! M-O stability parameter for next iteration
-    if ( RefHeightAboveGrd <= ZeroPlaneDispSfc ) then
-       write(*,*) "WARNING: critical problem: RefHeightAboveGrd <= ZeroPlaneDispSfc; model stops"
-       stop "Error in ResistanceAboveCanopyMostMod.F90"
+    ! This used to be a fatal `stop` guarding the log() calls below against a
+    ! non-positive argument. A hard stop here kills one MPI rank without
+    ! calling MPI_Finalize, which deadlocks the rest of a parallel run the
+    ! next time any other rank needs to communicate with it. Rather than
+    ! mutate the shared, persistent RefHeightAboveGrd state (read by other
+    ! routines this timestep), clamp only the local height-difference used in
+    ! the two log() calls immediately below, and warn (throttled) instead of
+    ! stopping.
+    RefHeightAboveSfcEff = RefHeightAboveGrd - ZeroPlaneDispSfc
+    if ( RefHeightAboveSfcEff <= 0.0 ) then
+       RefHeightWarnCount = RefHeightWarnCount + 1
+       if ( RefHeightWarnCount <= 20 .or. mod(RefHeightWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: RefHeightAboveGrd <= ZeroPlaneDispSfc (occurrence #", RefHeightWarnCount, "on this rank)"
+          if ( RefHeightWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
+       RefHeightAboveSfcEff = RoughLenMomSfc  ! small positive floor -> TMPCM = log(1) = 0
     endif
 
     ! temporary drag coefficients
-    TMPCM  = log((RefHeightAboveGrd - ZeroPlaneDispSfc) / RoughLenMomSfc)
-    TMPCH  = log((RefHeightAboveGrd - ZeroPlaneDispSfc) / RoughLenShCanopy)
+    TMPCM  = log(RefHeightAboveSfcEff / RoughLenMomSfc)
+    TMPCH  = log(RefHeightAboveSfcEff / RoughLenShCanopy)
     TMPCM2 = log((2.0 + RoughLenMomSfc) / RoughLenMomSfc)
     TMPCH2 = log((2.0 + RoughLenShCanopy) / RoughLenShCanopy)
 
