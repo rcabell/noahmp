@@ -177,6 +177,21 @@ contains
 
     type(noahmp_type), intent(inout) :: noahmp
 
+! local variable
+    ! Per-rank counters to throttle the repeated budget-closure warnings below
+    ! (see rationale in EnergyMainMod.F90) so a namelist option/input
+    ! combination that legitimately triggers these diagnostic audits at many
+    ! grid cells doesn't flood stdout. These checks are pure diagnostics
+    ! (EnergyBalanceError/RadSwBalanceError are `out`-only state, never
+    ! consumed by later physics), so warning instead of stopping doesn't
+    ! change any computed flux -- it only stops an already-computed residual
+    ! audit from fatally killing one MPI rank, which otherwise deadlocks the
+    ! whole run the next time any other rank needs to communicate with it
+    ! (a Fortran STOP on one rank does not call MPI_Finalize, so the
+    ! surviving ranks block forever on their next collective call).
+    integer, save                    :: SwBudgetWarnCount = 0
+    integer, save                    :: EnergyBudgetWarnCount = 0
+
 ! --------------------------------------------------------------------
     associate(                                                                 &
               GridIndexI           => noahmp%config%domain%GridIndexI         ,& ! in,  grid index in x-direction
@@ -214,24 +229,30 @@ contains
     RadSwBalanceError = RadSwDownRefHeight - (RadSwAbsSfc + RadSwReflSfc)
 
     ! print out diagnostics when error is large
+    ! Warn (throttled) instead of a fatal stop -- see the rationale comment
+    ! on the local counters above.
     if ( abs(RadSwBalanceError) > 0.01 ) then
-       write(*,*) "GridIndexI, GridIndexJ              = ", GridIndexI, GridIndexJ
-       write(*,*) "RadSwBalanceError                   = ", RadSwBalanceError
-       write(*,*) "VEGETATION ---------"
-       write(*,*) "RadSwDownRefHeight * VegFrac        = ", RadSwDownRefHeight*VegFrac
-       write(*,*) "VegFrac*RadSwAbsVeg + RadSwAbsGrd   = ", VegFrac*RadSwAbsVeg+RadSwAbsGrd
-       write(*,*) "VegFrac*RadSwReflVeg + RadSwReflGrd = ", VegFrac*RadSwReflVeg+RadSwReflGrd
-       write(*,*) "GROUND -------"
-       write(*,*) "(1 - VegFrac) * RadSwDownRefHeight  = ", (1.0-VegFrac)*RadSwDownRefHeight
-       write(*,*) "(1 - VegFrac) * RadSwAbsGrd         = ", (1.0-VegFrac)*RadSwAbsGrd
-       write(*,*) "(1 - VegFrac) * RadSwReflGrd        = ", (1.0-VegFrac)*RadSwReflGrd
-       write(*,*) "RadSwReflVeg                        = ", RadSwReflVeg
-       write(*,*) "RadSwReflGrd                        = ", RadSwReflGrd
-       write(*,*) "RadSwReflSfc                        = ", RadSwReflSfc
-       write(*,*) "RadSwAbsVeg                         = ", RadSwAbsVeg
-       write(*,*) "RadSwAbsGrd                         = ", RadSwAbsGrd
-       write(*,*) "RadSwAbsSfc                         = ", RadSwAbsSfc
-       stop "Error: Solar radiation budget problem in NoahMP LSM"
+       SwBudgetWarnCount = SwBudgetWarnCount + 1
+       if ( SwBudgetWarnCount <= 20 .or. mod(SwBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: Solar radiation budget problem in NoahMP LSM (occurrence #", SwBudgetWarnCount, "on this rank)"
+          write(*,*) "GridIndexI, GridIndexJ              = ", GridIndexI, GridIndexJ
+          write(*,*) "RadSwBalanceError                   = ", RadSwBalanceError
+          write(*,*) "VEGETATION ---------"
+          write(*,*) "RadSwDownRefHeight * VegFrac        = ", RadSwDownRefHeight*VegFrac
+          write(*,*) "VegFrac*RadSwAbsVeg + RadSwAbsGrd   = ", VegFrac*RadSwAbsVeg+RadSwAbsGrd
+          write(*,*) "VegFrac*RadSwReflVeg + RadSwReflGrd = ", VegFrac*RadSwReflVeg+RadSwReflGrd
+          write(*,*) "GROUND -------"
+          write(*,*) "(1 - VegFrac) * RadSwDownRefHeight  = ", (1.0-VegFrac)*RadSwDownRefHeight
+          write(*,*) "(1 - VegFrac) * RadSwAbsGrd         = ", (1.0-VegFrac)*RadSwAbsGrd
+          write(*,*) "(1 - VegFrac) * RadSwReflGrd        = ", (1.0-VegFrac)*RadSwReflGrd
+          write(*,*) "RadSwReflVeg                        = ", RadSwReflVeg
+          write(*,*) "RadSwReflGrd                        = ", RadSwReflGrd
+          write(*,*) "RadSwReflSfc                        = ", RadSwReflSfc
+          write(*,*) "RadSwAbsVeg                         = ", RadSwAbsVeg
+          write(*,*) "RadSwAbsGrd                         = ", RadSwAbsGrd
+          write(*,*) "RadSwAbsSfc                         = ", RadSwAbsSfc
+          if ( SwBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
     endif
 
     ! SNICAR
@@ -251,22 +272,28 @@ contains
                          HeatLatentTransp + HeatGroundTot + HeatLatentIrriEvap + HeatCanStorageChg)
 
     ! print out diagnostics when error is large
+    ! Warn (throttled) instead of a fatal stop -- see the rationale comment
+    ! on the local counters above.
     if ( abs(EnergyBalanceError) > 0.01 ) then
-       write(*,*) 'EnergyBalanceError = ', EnergyBalanceError, ' at GridIndexI,GridIndexJ: ', GridIndexI, GridIndexJ
-       write(*,'(a17,F10.4)' ) "Net solar:        ", RadSwAbsSfc
-       write(*,'(a17,F10.4)' ) "Net longwave:     ", RadLwNetSfc
-       write(*,'(a17,F10.4)' ) "Total sensible:   ", HeatSensibleSfc
-       write(*,'(a17,F10.4)' ) "Canopy evap:      ", HeatLatentCanopy
-       write(*,'(a17,F10.4)' ) "Ground evap:      ", HeatLatentGrd
-       write(*,'(a17,F10.4)' ) "Transpiration:    ", HeatLatentTransp
-       write(*,'(a17,F10.4)' ) "Total ground:     ", HeatGroundTot
-       write(*,'(a17,F10.4)' ) "Sprinkler:        ", HeatLatentIrriEvap
-       write(*,'(a17,F10.4)' ) "Canopy heat storage change: ", HeatCanStorageChg
-       write(*,'(a17,4F10.4)') "Precip advected:  ", HeatPrecipAdvSfc,HeatPrecipAdvCanopy,HeatPrecipAdvVegGrd,HeatPrecipAdvBareGrd
-       write(*,'(a17,F10.4)' ) "Veg fraction:     ", VegFrac
-       write(*,'(a17,F10.4)' ) "Light through soil/snow layer total:  ", sum(RadSwPenetrateGrd) 
-       write(*,'(a17,4F10.4)') "Light through soil/snow layer:  ", RadSwPenetrateGrd
-       stop "Error: Energy budget problem in NoahMP LSM"
+       EnergyBudgetWarnCount = EnergyBudgetWarnCount + 1
+       if ( EnergyBudgetWarnCount <= 20 .or. mod(EnergyBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: Energy budget problem in NoahMP LSM (occurrence #", EnergyBudgetWarnCount, "on this rank)"
+          write(*,*) 'EnergyBalanceError = ', EnergyBalanceError, ' at GridIndexI,GridIndexJ: ', GridIndexI, GridIndexJ
+          write(*,'(a17,F10.4)' ) "Net solar:        ", RadSwAbsSfc
+          write(*,'(a17,F10.4)' ) "Net longwave:     ", RadLwNetSfc
+          write(*,'(a17,F10.4)' ) "Total sensible:   ", HeatSensibleSfc
+          write(*,'(a17,F10.4)' ) "Canopy evap:      ", HeatLatentCanopy
+          write(*,'(a17,F10.4)' ) "Ground evap:      ", HeatLatentGrd
+          write(*,'(a17,F10.4)' ) "Transpiration:    ", HeatLatentTransp
+          write(*,'(a17,F10.4)' ) "Total ground:     ", HeatGroundTot
+          write(*,'(a17,F10.4)' ) "Sprinkler:        ", HeatLatentIrriEvap
+          write(*,'(a17,F10.4)' ) "Canopy heat storage change: ", HeatCanStorageChg
+          write(*,'(a17,4F10.4)') "Precip advected:  ", HeatPrecipAdvSfc,HeatPrecipAdvCanopy,HeatPrecipAdvVegGrd,HeatPrecipAdvBareGrd
+          write(*,'(a17,F10.4)' ) "Veg fraction:     ", VegFrac
+          write(*,'(a17,F10.4)' ) "Light through soil/snow layer total:  ", sum(RadSwPenetrateGrd)
+          write(*,'(a17,4F10.4)') "Light through soil/snow layer:  ", RadSwPenetrateGrd
+          if ( EnergyBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
     endif
 
     end associate

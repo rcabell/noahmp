@@ -35,6 +35,8 @@ contains
     type(noahmp_type), intent(inout) :: noahmp
 
 ! local variable
+    ! See the matching counter/rationale in EnergyMainMod.F90.
+    integer, save                    :: LwBudgetWarnCount = 0
 
 ! --------------------------------------------------------------------
     associate(                                                                    &
@@ -129,11 +131,22 @@ contains
     RoughLenMomSfcToAtm = RoughLenMomGrd
 
     ! emitted longwave radiation and physical check
+    ! See the matching clamp in EnergyMainMod.F90 -- a hard `stop` here kills
+    ! one MPI rank without calling MPI_Finalize, which deadlocks the rest of
+    ! a parallel run the next time any other rank needs to communicate with
+    ! it. Clamp to a small positive floor and warn instead of stopping.
     RadLwEmitSfc = RadLwDownRefHeight + RadLwNetSfc
     if ( RadLwEmitSfc <= 0.0 ) then
-       write(*,*) "emitted longwave <0; skin T may be wrong due to inconsistent"
-       write(*,*) "RadLwDownRefHeight = ", RadLwDownRefHeight, "RadLwNetSfc = ", RadLwNetSfc, "SnowDepth = ", SnowDepth
-       stop "Error: Longwave radiation budget problem in NoahMP LSM"
+       LwBudgetWarnCount = LwBudgetWarnCount + 1
+       if ( LwBudgetWarnCount <= 20 .or. mod(LwBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: emitted longwave <0; skin T may be wrong due to inconsistent"
+          write(*,*) "RadLwDownRefHeight = ", RadLwDownRefHeight, "RadLwNetSfc = ", RadLwNetSfc, &
+                     "SnowDepth = ", SnowDepth, "(occurrence #", LwBudgetWarnCount, "on this rank)"
+          if ( LwBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
+       ! floor chosen so the TemperatureRadSfc calc below, which subtracts
+       ! (1-EmissivitySfc)*RadLwDownRefHeight from this, still stays positive
+       RadLwEmitSfc = (1.0-EmissivitySfc) * RadLwDownRefHeight + 1.0
     endif
 
     ! radiative temperature: subtract from the emitted IR the

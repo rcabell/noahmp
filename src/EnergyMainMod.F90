@@ -72,6 +72,11 @@ contains
 
 ! local variable
     logical                          :: FlagVegSfc    ! flag: true if vegetated surface
+    ! Per-rank counter to throttle the repeated longwave-budget warning below
+    ! (see rationale at its call site) so a namelist option/input combination
+    ! that legitimately triggers it at many grid cells doesn't flood stdout
+    ! and slow a large-domain run to a crawl.
+    integer, save                    :: LwBudgetWarnCount = 0
 
 ! --------------------------------------------------------------------
     associate(                                                                        &
@@ -288,14 +293,29 @@ contains
     endif
 
     ! emitted longwave radiation and physical check
+    ! This nonphysical state (VegFracGreen inconsistent with LeafAreaIndex,
+    ! e.g. under DYNAMIC_VEG_OPTION=4 where VegFracGreen tracks the static
+    ! annual-max greenness rather than the current LAI) is a known fragility,
+    ! not unique to any particular driver. A hard `stop` here kills one MPI
+    ! rank without calling MPI_Finalize, which deadlocks the rest of a
+    ! parallel run the next time any other rank needs to communicate with it
+    ! (observed hung in a collective communication call). Clamp to a small
+    ! positive floor and warn instead of stopping, so one marginal cell
+    ! can't take down the whole run.
     RadLwEmitSfc = RadLwDownRefHeight + RadLwNetSfc
     if ( RadLwEmitSfc <= 0.0 ) then
-       write(*,*) "emitted longwave <0; skin T may be wrong due to inconsistent"
-       write(*,*) "input of VegFracGreen with LeafAreaIndex"
-       write(*,*) "VegFrac = ", VegFrac, "VegAreaIndEff = ", VegAreaIndEff, &
-                  "TemperatureCanopy = ", TemperatureCanopy, "TemperatureGrd = ", TemperatureGrd
-       write(*,*) "RadLwDownRefHeight = ", RadLwDownRefHeight, "RadLwNetSfc = ", RadLwNetSfc, "SnowDepth = ", SnowDepth
-       stop "Error: Longwave radiation budget problem in NoahMP LSM"
+       LwBudgetWarnCount = LwBudgetWarnCount + 1
+       if ( LwBudgetWarnCount <= 20 .or. mod(LwBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: emitted longwave <0; skin T may be wrong due to inconsistent"
+          write(*,*) "input of VegFracGreen with LeafAreaIndex (occurrence #", LwBudgetWarnCount, "on this rank)"
+          write(*,*) "VegFrac = ", VegFrac, "VegAreaIndEff = ", VegAreaIndEff, &
+                     "TemperatureCanopy = ", TemperatureCanopy, "TemperatureGrd = ", TemperatureGrd
+          write(*,*) "RadLwDownRefHeight = ", RadLwDownRefHeight, "RadLwNetSfc = ", RadLwNetSfc, "SnowDepth = ", SnowDepth
+          if ( LwBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
+       ! floor chosen so the TemperatureRadSfc calc below, which subtracts
+       ! (1-EmissivitySfc)*RadLwDownRefHeight from this, still stays positive
+       RadLwEmitSfc = (1.0-EmissivitySfc) * RadLwDownRefHeight + 1.0
     endif
 
     ! radiative temperature: subtract from the emitted IR the

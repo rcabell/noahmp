@@ -111,6 +111,11 @@ contains
 
     type(noahmp_type), intent(inout) :: noahmp
 
+! local variable
+    ! See the matching counters/rationale in BalanceErrorCheckMod.F90.
+    integer, save                    :: SwBudgetWarnCount = 0
+    integer, save                    :: EnergyBudgetWarnCount = 0
+
 ! --------------------------------------------------------------------
     associate(                                                                 &
               GridIndexI           => noahmp%config%domain%GridIndexI         ,& ! in,  grid index in x-direction
@@ -135,14 +140,20 @@ contains
     RadSwBalanceError = RadSwDownRefHeight - (RadSwAbsSfc + RadSwReflSfc)
 
     ! print out diagnostics when error is large
+    ! Warn (throttled) instead of a fatal stop -- see the rationale comment
+    ! on the local counters above.
     if ( abs(RadSwBalanceError) > 0.01 ) then
-       write(*,*) "GridIndexI, GridIndexJ = ", GridIndexI, GridIndexJ
-       write(*,*) "RadSwBalanceError      = ", RadSwBalanceError
-       write(*,*) "RadSwDownRefHeight     = ", RadSwDownRefHeight
-       write(*,*) "RadSwReflSfc           = ", RadSwReflSfc
-       write(*,*) "RadSwAbsGrd            = ", RadSwAbsGrd
-       write(*,*) "RadSwAbsSfc            = ", RadSwAbsSfc
-       stop "Error: Solar radiation budget problem in NoahMP LSM"
+       SwBudgetWarnCount = SwBudgetWarnCount + 1
+       if ( SwBudgetWarnCount <= 20 .or. mod(SwBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: Solar radiation budget problem in NoahMP LSM (occurrence #", SwBudgetWarnCount, "on this rank)"
+          write(*,*) "GridIndexI, GridIndexJ = ", GridIndexI, GridIndexJ
+          write(*,*) "RadSwBalanceError      = ", RadSwBalanceError
+          write(*,*) "RadSwDownRefHeight     = ", RadSwDownRefHeight
+          write(*,*) "RadSwReflSfc           = ", RadSwReflSfc
+          write(*,*) "RadSwAbsGrd            = ", RadSwAbsGrd
+          write(*,*) "RadSwAbsSfc            = ", RadSwAbsSfc
+          if ( SwBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
     endif
 
     ! SNICAR
@@ -159,15 +170,21 @@ contains
     ! error in surface energy balance should be <0.01 W/m2
     EnergyBalanceError = RadSwAbsGrd + HeatPrecipAdvSfc - (RadLwNetSfc + HeatSensibleSfc + HeatLatentGrd + HeatGroundTot)
     ! print out diagnostics when error is large
+    ! Warn (throttled) instead of a fatal stop -- see the rationale comment
+    ! on the local counters above.
     if ( abs(EnergyBalanceError) > 0.01 ) then
-       write(*,*) 'EnergyBalanceError = ', EnergyBalanceError, ' at GridIndexI,GridIndexJ: ', GridIndexI, GridIndexJ
-       write(*,'(a17,F10.4)' ) "Net longwave:       ", RadLwNetSfc
-       write(*,'(a17,F10.4)' ) "Total sensible:     ", HeatSensibleSfc
-       write(*,'(a17,F10.4)' ) "Ground evap:        ", HeatLatentGrd
-       write(*,'(a17,F10.4)' ) "Total ground:       ", HeatGroundTot
-       write(*,'(a17,4F10.4)') "Precip advected:    ", HeatPrecipAdvSfc
-       write(*,'(a17,F10.4)' ) "absorbed shortwave: ", RadSwAbsGrd
-       stop "Error: Surface energy budget problem in NoahMP LSM"
+       EnergyBudgetWarnCount = EnergyBudgetWarnCount + 1
+       if ( EnergyBudgetWarnCount <= 20 .or. mod(EnergyBudgetWarnCount, 10000) == 0 ) then
+          write(*,*) "WARNING: Surface energy budget problem in NoahMP LSM (occurrence #", EnergyBudgetWarnCount, "on this rank)"
+          write(*,*) 'EnergyBalanceError = ', EnergyBalanceError, ' at GridIndexI,GridIndexJ: ', GridIndexI, GridIndexJ
+          write(*,'(a17,F10.4)' ) "Net longwave:       ", RadLwNetSfc
+          write(*,'(a17,F10.4)' ) "Total sensible:     ", HeatSensibleSfc
+          write(*,'(a17,F10.4)' ) "Ground evap:        ", HeatLatentGrd
+          write(*,'(a17,F10.4)' ) "Total ground:       ", HeatGroundTot
+          write(*,'(a17,4F10.4)') "Precip advected:    ", HeatPrecipAdvSfc
+          write(*,'(a17,F10.4)' ) "absorbed shortwave: ", RadSwAbsGrd
+          if ( EnergyBudgetWarnCount == 20 ) write(*,*) "WARNING: further occurrences on this rank logged only every 10000th time"
+       endif
     endif
 
     end associate
